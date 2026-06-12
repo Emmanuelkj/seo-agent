@@ -1,0 +1,22 @@
+# Environments                                                                                                     
+venv/                                                                                                              
+env/                                                                                                               
+.venv/                                                                                                             
+                                                                                                                       
+# Python Cache                                                                                                     
+__pycache__/                                                                                                       
+*.pyc                                                                                                              
+*.pyo                                                                                                              
+*.pyd                                                                                                              
+                                                                                                                       
+# Secrets & Environment Variables (CRITICAL)                                                                       
+.env                                                                                                               
+.env.local                                                                                                         
+                                                                                                                       
+# Backups & Logs                                                                                                   
+*.bak                                                                                                              
+*.log                                                                                                              
+                                                                                                                       
+# OS generated files                                                                                               
+.DS_Store                                                                                                          
+Thumbs.db

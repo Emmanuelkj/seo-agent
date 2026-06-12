@@ -1,0 +1,592 @@
+import { useState, useEffect } from 'react';
+
+const PRESET_PROJECTS = [
+  { name: "Novox Core", url: "https://novoxcore.com/" },
+  { name: "Cinescape", url: "https://www.cinescape.com.kw/" }
+];
+
+const DonutChart = ({ score, size = 120, strokeWidth = 12 }) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const offset = circumference - ((score || 0) / 100) * circumference;
+  let colorClass = score >= 90 ? "text-emerald-500" : score >= 50 ? "text-amber-500" : "text-red-500";
+  
+  return (
+    <div className="relative inline-flex items-center justify-center drop-shadow-sm" style={{ width: size, height: size }}>
+      <svg className="transform -rotate-90 w-full h-full">
+        <circle className="text-slate-100 dark:text-slate-800" strokeWidth={strokeWidth} stroke="currentColor" fill="transparent" r={radius} cx={size/2} cy={size/2} />
+        <circle className={`${colorClass} transition-all duration-1000 ease-out`} strokeWidth={strokeWidth} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" stroke="currentColor" fill="transparent" r={radius} cx={size/2} cy={size/2} />
+      </svg>
+      <div className="absolute flex flex-col items-center justify-center">
+        <span className="text-3xl font-black text-slate-800 dark:text-white">{score || 0}</span>
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [selectedProjectIndex, setSelectedProjectIndex] = useState(0);
+  const targetUrl = PRESET_PROJECTS[selectedProjectIndex].url;
+  
+  const [auditData, setAuditData] = useState(null); 
+  const [batchData, setBatchData] = useState([]);   
+  const [batchId, setBatchId] = useState(null);     
+  
+  const [loadingSingle, setLoadingSingle] = useState(false);
+  const [isCrawling, setIsCrawling] = useState(false);
+  const [activeTab, setActiveTab] = useState(1);
+  const [darkMode, setDarkMode] = useState(true); // Default to Dark Mode since it looks more premium!
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
+  const handleSingleAudit = async (e) => {
+    e.preventDefault();
+    if (!targetUrl) return;
+    setLoadingSingle(true); setAuditData(null); setBatchData([]); setBatchId(null); setIsCrawling(false);
+    try {
+      const res = await fetch('/api/audit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_url: targetUrl }) });
+      setAuditData(await res.json());
+    } catch (err) {
+      alert("Failed to run single audit.");
+    } finally { setLoadingSingle(false); }
+  };
+
+  const handleSiteCrawl = async (e) => {
+    e.preventDefault();
+    if (!targetUrl) return;
+    setIsCrawling(true); setAuditData(null); setBatchData([]);
+    try {
+      const res = await fetch('/api/crawl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_url: targetUrl }) });
+      const data = await res.json();
+      if (data.batch_id) setBatchId(data.batch_id); 
+    } catch (err) {
+      setIsCrawling(false); alert("Failed to deploy spider.");
+    }
+  };
+
+  useEffect(() => {
+    let interval;
+    if (batchId && isCrawling) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch('/api/audits');
+          const result = await res.json();
+          if (result.data) {
+            setBatchData(result.data.filter(row => row.batch_id === batchId));
+          }
+          const statusRes = await fetch(`/api/crawl/status/${batchId}`);
+          if ((await statusRes.json()).status === 'completed') setIsCrawling(false);
+        } catch (err) {}
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [batchId, isCrawling]);
+
+  const getScoreBg = (score) => {
+    if (score >= 90) return 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400';
+    if (score >= 50) return 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-400';
+    return 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-400';
+  };
+
+  const openDeepDive = (dbRow) => {
+    setAuditData({
+      target_url: dbRow.target_url,
+      pagespeed_api: dbRow.issues_found?.pagespeed,
+      local_scraping: dbRow.issues_found?.local,
+      pagerank_score: dbRow.issues_found?.pagerank_score
+    });
+    setActiveTab(1);
+  };
+
+  const avgScore = batchData.length > 0 ? Math.round(batchData.reduce((acc, row) => acc + (row.overall_score || 0), 0) / batchData.length) : 0;
+  
+  return (
+    <div className="flex h-screen bg-slate-50 dark:bg-[#0b0f19] font-sans text-slate-800 dark:text-slate-200 overflow-hidden selection:bg-indigo-500 selection:text-white transition-colors duration-300">
+      {/* SIDEBAR */}
+      <aside className="w-80 bg-slate-900 dark:bg-[#111827] text-slate-300 flex flex-col shadow-2xl z-20 relative border-r border-slate-800 dark:border-slate-800/50 transition-colors duration-300">
+        <div className="p-8 border-b border-slate-800 dark:border-slate-800/50 flex justify-between items-center">
+          <div>
+            <div className="flex items-center gap-3 text-white mb-1">
+              <svg className="w-8 h-8 text-indigo-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" fill="none"/></svg>
+              <h1 className="text-2xl font-black tracking-tight text-white">SEO Agent</h1>
+            </div>
+            <p className="text-xs text-slate-500 font-medium tracking-widest uppercase mt-2">Enterprise SEO Checker</p>
+          </div>
+          
+          <button 
+            onClick={() => setDarkMode(!darkMode)}
+            className="p-2.5 rounded-xl bg-slate-800 dark:bg-slate-800 hover:bg-slate-700 dark:hover:bg-slate-700 text-slate-300 hover:text-white transition-all shadow-inner border border-slate-700/50"
+            title="Toggle Theme"
+          >
+            {darkMode ? (
+              <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+            ) : (
+              <svg className="w-5 h-5 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            )}
+          </button>
+        </div>
+        
+        <div className="p-8 flex-1 flex flex-col gap-8">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Target Project</label>
+            <div className="relative">
+              <select
+                value={selectedProjectIndex}
+                onChange={(e) => setSelectedProjectIndex(Number(e.target.value))}
+                className="w-full bg-slate-800 dark:bg-slate-900 border border-slate-700 dark:border-slate-800 rounded-xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none font-medium cursor-pointer transition-all"
+              >
+                {PRESET_PROJECTS.map((project, index) => (
+                  <option key={index} value={index}>{project.name}</option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2 truncate" title={targetUrl}>{targetUrl}</p>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <button onClick={handleSiteCrawl} disabled={loadingSingle || isCrawling} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-4 rounded-xl font-bold transition-all shadow-lg shadow-indigo-900/50 disabled:opacity-50 disabled:shadow-none flex justify-center items-center gap-2">
+              {isCrawling ? (
+                <><span className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></span> Crawling...</>
+              ) : 'Crawl Entire Domain'}
+            </button>
+            <button onClick={handleSingleAudit} disabled={loadingSingle || isCrawling} className="w-full bg-slate-800 dark:bg-slate-900 hover:bg-slate-700 dark:hover:bg-slate-800 text-white border border-slate-700 dark:border-slate-800 px-6 py-4 rounded-xl font-bold transition-colors disabled:opacity-50">
+              {loadingSingle ? 'Auditing...' : 'Deep-Dive (Homepage)'}
+            </button>
+          </div>
+        </div>
+        
+        <div className="p-6 border-t border-slate-800 dark:border-slate-800/50 text-center">
+          <p className="text-xs text-slate-500 font-medium">Powered by Novox AI</p>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT */}
+      <main className="flex-1 overflow-y-auto relative bg-slate-50/50 dark:bg-[#0b0f19] transition-colors duration-300">
+        
+        {!auditData ? (
+          /* DASHBOARD VIEW */
+          <div className="p-10 max-w-6xl mx-auto min-h-full flex flex-col">
+            <div className="flex justify-between items-end mb-8">
+              <div>
+                <h2 className="text-3xl font-black text-slate-900 dark:text-white mb-1">Dashboard</h2>
+                <p className="text-slate-500 dark:text-slate-400 font-medium">Overview of your site's technical health.</p>
+              </div>
+              {isCrawling && (
+                <div className="flex items-center gap-3 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 px-4 py-2 rounded-full shadow-sm">
+                  <div className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-600 dark:bg-indigo-400"></span>
+                  </div>
+                  <span className="text-indigo-700 dark:text-indigo-300 font-bold text-sm tracking-wide">Novox AI Analyzing Domain...</span>
+                </div>
+              )}
+              {!isCrawling && batchData.length > 0 && <span className="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-500/10 px-4 py-2 rounded-full border border-emerald-100 dark:border-emerald-500/20">✓ Crawl Complete</span>}
+            </div>
+
+            {batchData.length > 0 ? (
+              <div className="animate-fade-in space-y-8">
+                {/* METRICS GRID */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white dark:bg-[#111827] p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-6 transition-colors duration-300">
+                    <DonutChart score={avgScore} size={100} strokeWidth={10} />
+                    <div>
+                      <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Avg Score</p>
+                      <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">Across {batchData.length} pages</p>
+                    </div>
+                  </div>
+                  <div className="bg-white dark:bg-[#111827] p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-center transition-colors duration-300">
+                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-2">Pages Indexed</p>
+                    <p className="text-5xl font-black text-slate-800 dark:text-white">{batchData.length}</p>
+                  </div>
+                  <div className="bg-white dark:bg-[#111827] p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-center transition-colors duration-300">
+                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-2">Avg Speed</p>
+                    <p className="text-5xl font-black text-slate-800 dark:text-white">
+                      {(batchData.reduce((acc, row) => acc + (row.response_time || 0), 0) / batchData.length).toFixed(2)}s
+                    </p>
+                  </div>
+                </div>
+
+                {/* PAGES TABLE */}
+                <div className="bg-white dark:bg-[#111827] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col transition-colors duration-300">
+                  <div className="grid grid-cols-12 gap-4 p-5 bg-slate-50/80 dark:bg-[#1f2937]/50 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">
+                    <div className="col-span-6 pl-2">URL Structure</div>
+                    <div className="col-span-2 text-center">Score</div>
+                    <div className="col-span-2 text-center">Speed</div>
+                    <div className="col-span-2 text-right pr-2">Action</div>
+                  </div>
+                  
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800 overflow-y-auto">
+                    {batchData.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-4 p-5 items-center hover:bg-slate-50/80 dark:hover:bg-[#1f2937]/30 transition-colors group">
+                        <div className="col-span-6 text-slate-700 dark:text-slate-300 font-medium truncate pl-2" title={row.target_url}>
+                          {row.target_url.replace('https://', '').replace('http://', '')}
+                        </div>
+                        <div className="col-span-2 text-center">
+                          <span className={`inline-block px-3 py-1 rounded-lg text-sm font-bold ${getScoreBg(row.overall_score)}`}>{row.overall_score}%</span>
+                        </div>
+                        <div className="col-span-2 text-center text-slate-500 dark:text-slate-400 font-medium">
+                          {row.response_time ? `${Number(row.response_time).toFixed(2)}s` : '-'}
+                        </div>
+                        <div className="col-span-2 text-right pr-2">
+                          <button onClick={() => openDeepDive(row)} className="text-indigo-600 dark:text-indigo-400 opacity-0 group-hover:opacity-100 font-bold hover:text-indigo-800 dark:hover:text-indigo-300 transition-all text-sm flex items-center justify-end gap-1 w-full">
+                            Details <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+                <div className="w-24 h-24 bg-indigo-50 dark:bg-indigo-500/10 rounded-full flex items-center justify-center mb-6">
+                  <svg className="w-10 h-10 text-indigo-300 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-2">No Audits Yet</h3>
+                <p className="text-slate-500 dark:text-slate-400 font-medium">Select a project from the sidebar and click Crawl to generate a comprehensive SEO report.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* DEEP DIVE VIEW */
+          <div className="p-10 max-w-6xl mx-auto min-h-full animate-fade-in flex flex-col">
+            {(isCrawling || batchData.length > 0) && (
+               <button onClick={() => setAuditData(null)} className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-bold flex items-center gap-2 mb-8 transition-colors w-fit bg-white dark:bg-[#111827] px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+                 Back to Dashboard
+               </button>
+            )}
+
+            <div className="mb-8">
+              <h2 className="text-3xl font-black text-slate-900 dark:text-white mb-2 truncate" title={auditData.target_url}>
+                {auditData.target_url.replace('https://', '').replace('http://', '')}
+              </h2>
+              <div className="flex items-center gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span className="text-slate-500 dark:text-slate-400 font-mono text-sm">{auditData.target_url}</span>
+              </div>
+            </div>
+
+            <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+              <div className="bg-white dark:bg-[#111827] p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-6 relative overflow-hidden transition-colors duration-300">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50 dark:bg-slate-900 rounded-bl-full -mr-8 -mt-8 z-0"></div>
+                <div className="relative z-10"><DonutChart score={auditData.overall_score} size={100} strokeWidth={10} /></div>
+                <div className="relative z-10">
+                  <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">On-Page SEO</p>
+                  <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">Score</p>
+                </div>
+              </div>
+              <div className="bg-white dark:bg-[#111827] p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-center transition-colors duration-300">
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-2">Response Time</p>
+                <p className="text-5xl font-black text-slate-800 dark:text-white">
+                  {auditData.local_scraping?.response_time ? `${Number(auditData.local_scraping.response_time).toFixed(2)}s` : 'N/A'}
+                </p>
+              </div>
+              <div className="bg-white dark:bg-[#111827] p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col justify-center transition-colors duration-300">
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-2">Word Count</p>
+                <p className="text-5xl font-black text-slate-800 dark:text-white">
+                  {auditData.local_scraping?.word_count || 0}
+                </p>
+              </div>
+            </section>
+
+            <div className="bg-white dark:bg-[#111827] rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 flex-1 flex flex-col overflow-hidden transition-colors duration-300">
+              <div className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-[#0b0f19]/50">
+                <nav className="flex px-6">
+                  {['Action Plan', 'Meta Data', 'Content Quality', 'AI Insights'].map((tab, idx) => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(idx + 1)}
+                      className={`py-5 px-6 border-b-2 font-bold text-sm transition-all ${
+                        activeTab === idx + 1
+                          ? 'border-indigo-600 dark:border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                          : 'border-transparent text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
+                      }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+              <div className="p-8 flex-1 bg-white dark:bg-[#111827]">
+                {activeTab === 1 && <TabOverview data={auditData} />}
+                {activeTab === 2 && <TabMetaData data={auditData.local_scraping} />}
+                {activeTab === 3 && <TabPageQuality data={auditData.local_scraping} />}
+                {activeTab === 4 && <TabAIInsights data={auditData} />}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function TabOverview({ data }) {
+  const [isFixing, setIsFixing] = useState(false);
+  const [prUrl, setPrUrl] = useState(null);
+  
+  const { local_scraping, pagespeed_api } = data;
+  const actionItems = [];
+
+  const translateJargon = (text) => {
+    const dictionary = {
+      "Links are not crawlable": "Ensure all links are easily crawlable by search engines to improve indexing.",
+      "Image elements do not have `[alt]` attributes": "Improve image SEO by adding descriptive alternative text to all images.",
+      "Document does not have a meta description": "Add a compelling meta description to improve search visibility and click-through rates.",
+      "Document doesn't have a `<title>` element": "Add a descriptive <title> tag to establish the primary topic of the page.",
+    };
+    return dictionary[text] || text.replace(/`/g, "'") + ".";
+  };
+
+  if (pagespeed_api?.specific_warnings?.length > 0) {
+    pagespeed_api.specific_warnings.forEach(warning => actionItems.push({ level: 'Error', text: translateJargon(warning) }));
+  }
+  if (!local_scraping?.title) actionItems.push({ level: 'Error', text: 'Define a clear, descriptive meta title for the page.' });
+  if (!local_scraping?.description) actionItems.push({ level: 'Error', text: 'Improve the text of the meta description. It is currently missing.' });
+  else if (local_scraping?.description?.length > 160) actionItems.push({ level: 'Warning', text: `The meta description is too long (${local_scraping.description.length} characters).` });
+  
+  if (local_scraping?.images_missing_alt_count > 0) actionItems.push({ level: 'Warning', text: `Add missing alt text to ${local_scraping.images_missing_alt_count} image(s).` });
+  if (local_scraping?.response_time > 0.4) actionItems.push({ level: 'Notice', text: `Improve the page response time (${Number(local_scraping.response_time).toFixed(2)}s).` });
+  if (local_scraping?.word_count < 300) actionItems.push({ level: 'Notice', text: `Consider adding more valuable content to the page (${local_scraping.word_count} words).` });
+
+  const handleFix = async () => {
+    setIsFixing(true); setPrUrl(null);
+    try {
+      const res = await fetch('/api/fix', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_url: data.target_url, errors: { warnings: actionItems.map(item => item.text) } })
+      });
+      const result = await res.json();
+      if (result.status === 'success' && result.pr_link) setPrUrl(result.pr_link);
+      else alert('Failed to create PR: ' + (result.error || 'Unknown error'));
+    } catch (err) { alert('Error connecting to the backend.'); } 
+    finally { setIsFixing(false); }
+  };
+
+  return (
+    <div className="animate-fade-in">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
+        <div>
+          <h2 className="text-xl font-black text-slate-900 dark:text-white mb-1">Action Plan</h2>
+          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">Prioritized tasks to improve this page.</p>
+        </div>
+        {actionItems.length > 0 && (
+          <button onClick={handleFix} disabled={isFixing} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-600/30 disabled:opacity-50 disabled:shadow-none flex items-center gap-2">
+            {isFixing ? <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> Auto-Fixing...</> : '✨ Auto-Fix & Create PR'}
+          </button>
+        )}
+      </div>
+      
+      {local_scraping?.seobility_scores && (
+        <div className="mb-10 bg-white dark:bg-[#111827] p-8 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <h3 className="text-lg font-black text-slate-900 dark:text-white mb-6">On-Page Breakdown</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2">
+            {[
+              { label: "Technical (Lighthouse)", score: pagespeed_api?.pagespeed_seo_score || 0 },
+              { label: "Meta Data", score: local_scraping.seobility_scores.meta_data },
+              { label: "Page Quality", score: local_scraping.seobility_scores.page_quality },
+              { label: "Page Structure", score: local_scraping.seobility_scores.page_structure },
+              { label: "Server Response", score: local_scraping.seobility_scores.server }
+            ].map((item, i) => (
+              <div key={i} className="mb-4">
+                <div className="flex justify-between mb-2">
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{item.label}</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">{item.score}%</span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3 overflow-hidden">
+                  <div className={`h-3 rounded-full transition-all duration-1000 ${item.score >= 90 ? 'bg-emerald-500' : item.score >= 60 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${item.score}%` }}></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {prUrl && (
+        <div className="mb-8 p-5 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-2xl flex items-center gap-4">
+          <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-500/20 rounded-full flex items-center justify-center text-emerald-600 dark:text-emerald-400 text-xl">🎉</div>
+          <div>
+            <p className="text-emerald-900 dark:text-emerald-300 font-bold">Auto-Fix Successful!</p>
+            <p className="text-emerald-700 dark:text-emerald-400 text-sm font-medium mt-0.5">Your AI-generated Pull Request is ready: <a href={prUrl} target="_blank" rel="noreferrer" className="underline font-bold hover:text-emerald-900 dark:hover:text-emerald-200">Review & Merge on GitHub</a></p>
+          </div>
+        </div>
+      )}
+
+      {actionItems.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          {actionItems.map((item, i) => {
+            const isErr = item.level === 'Error';
+            const isWarn = item.level === 'Warning';
+            return (
+              <div key={i} className={`flex items-start gap-4 p-5 rounded-2xl border transition-colors ${isErr ? 'bg-red-50/50 dark:bg-red-500/5 border-red-100 dark:border-red-500/20' : isWarn ? 'bg-amber-50/50 dark:bg-amber-500/5 border-amber-100 dark:border-amber-500/20' : 'bg-blue-50/50 dark:bg-blue-500/5 border-blue-100 dark:border-blue-500/20'}`}>
+                <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isErr ? 'bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400' : isWarn ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400' : 'bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'}`}>
+                  {isErr ? '!' : isWarn ? '⚠️' : 'i'}
+                </div>
+                <div className="flex-1">
+                  <span className={`inline-block mb-1 text-xs font-black uppercase tracking-wider ${isErr ? 'text-red-600 dark:text-red-400' : isWarn ? 'text-amber-600 dark:text-amber-400' : 'text-blue-600 dark:text-blue-400'}`}>{item.level}</span>
+                  <p className="text-slate-800 dark:text-slate-200 font-medium leading-relaxed">{item.text}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-16 text-emerald-600 dark:text-emerald-400">
+          <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 text-4xl">🏆</div>
+          <h3 className="text-2xl font-black mb-2">Perfect Score</h3>
+          <p className="font-medium text-emerald-700/70 dark:text-emerald-400/70">No SEO issues detected on this page!</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabMetaData({ data }) {
+  const isDescLong = data?.description && data.description.length > 160;
+  return (
+    <div className="space-y-8 animate-fade-in">
+      <div>
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Page Title</h3>
+        <div className="bg-slate-50 dark:bg-[#1f2937]/50 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
+          {data?.title ? <p className="text-xl text-indigo-700 dark:text-indigo-400 font-bold hover:underline cursor-pointer">{data.title}</p> : <p className="text-slate-400 italic">No title tag found.</p>}
+        </div>
+      </div>
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Meta Description</h3>
+          {data?.description && <span className={`text-xs px-3 py-1 rounded-full font-bold ${isDescLong ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-400' : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400'}`}>{data.description.length} chars</span>}
+        </div>
+        <div className={`p-6 rounded-2xl border shadow-sm transition-colors ${isDescLong ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20' : 'bg-slate-50 dark:bg-[#1f2937]/50 border-slate-200 dark:border-slate-800'}`}>
+          {data?.description ? <p className={`${isDescLong ? 'text-amber-900 dark:text-amber-300' : 'text-slate-700 dark:text-slate-300'} font-medium leading-relaxed`}>{data.description}</p> : <p className="text-slate-400 italic">No meta description found.</p>}
+        </div>
+        {isDescLong && <p className="text-amber-600 dark:text-amber-400 text-sm mt-3 font-bold flex items-center gap-1.5"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"></path></svg> Warning: Truncated by search engines.</p>}
+      </div>
+    </div>
+  );
+}
+
+function TabPageQuality({ data }) {
+  const headings = data?.headings || {};
+  return (
+    <div className="animate-fade-in">
+      <h2 className="text-lg font-black mb-6 text-slate-900 dark:text-white uppercase tracking-widest">Heading Hierarchy</h2>
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        {['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].map((tag) => (
+          <div key={tag} className="bg-slate-50 dark:bg-[#1f2937]/50 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl flex flex-col items-center justify-center shadow-sm transition-colors">
+            <span className="font-mono text-slate-400 font-bold text-sm uppercase mb-1">{tag}</span>
+            <span className="text-3xl font-black text-slate-800 dark:text-white">{headings[tag] || 0}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-8 p-6 bg-indigo-50/50 dark:bg-indigo-500/10 rounded-2xl border border-indigo-100 dark:border-indigo-500/20 text-indigo-900 dark:text-indigo-300 transition-colors">
+        <p className="mb-3 font-black text-sm uppercase tracking-widest text-indigo-600 dark:text-indigo-400">Optimization Tips</p>
+        <ul className="space-y-3 font-medium text-sm">
+          <li className="flex gap-3"><span className="text-indigo-400">✓</span> Use exactly one <code className="text-indigo-800 dark:text-indigo-300 bg-indigo-100/50 dark:bg-indigo-500/30 px-1.5 py-0.5 rounded font-mono text-xs">H1</code> per page for the main title.</li>
+          <li className="flex gap-3"><span className="text-indigo-400">✓</span> Maintain a logical hierarchy without skipping levels.</li>
+          <li className="flex gap-3"><span className="text-indigo-400">✓</span> Include target keywords naturally in your headings.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function TabAIInsights({ data }) {
+  const [copied, setCopied] = useState(false);
+  const scraping = data?.local_scraping || {};
+  const schemaStr = scraping.schema_markup_suggestion || "";
+  let formattedSchema = schemaStr;
+  
+  try {
+    if (schemaStr) {
+       formattedSchema = JSON.stringify(JSON.parse(schemaStr), null, 2);
+    }
+  } catch (e) {
+    // If it's not valid JSON, leave it as is
+  }
+
+  const readabilityRaw = scraping.readability_score;
+  const readability = typeof readabilityRaw === 'number' ? readabilityRaw.toFixed(1) : (readabilityRaw || "N/A");
+  
+  const intent = scraping.search_intent || "Analyzing...";
+  
+  const prScoreRaw = data?.pagerank_score;
+  const prScore = typeof prScoreRaw === 'number' && prScoreRaw > 0 ? prScoreRaw.toFixed(4) : "N/A";
+
+  const wrappedSchema = formattedSchema ? `<script type="application/ld+json">\n${formattedSchema}\n</script>` : "";
+
+  const handleCopy = () => {
+    if (!formattedSchema) return;
+    navigator.clipboard.writeText(wrappedSchema);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="animate-fade-in space-y-8">
+      {/* Top AI Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-slate-50 dark:bg-[#1f2937]/50 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Search Intent</p>
+          <p className="text-xl font-black text-indigo-600 dark:text-indigo-400">{intent}</p>
+        </div>
+        <div className="bg-slate-50 dark:bg-[#1f2937]/50 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Readability (Flesch)</p>
+          <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">{readability}</p>
+        </div>
+        <div className="bg-slate-50 dark:bg-[#1f2937]/50 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Link Juice (PageRank)</p>
+          <p className="text-xl font-black text-amber-600 dark:text-amber-400">{prScore}</p>
+        </div>
+      </div>
+
+      {/* Schema Generator */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Auto-Generated Schema (JSON-LD)</h3>
+          <div className="flex items-center gap-3">
+            {formattedSchema && (
+              <button 
+                onClick={handleCopy}
+                className="flex items-center gap-1 text-xs font-bold px-3 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-full transition-colors shadow-sm"
+              >
+                {copied ? "Copied!" : "Copy Code"}
+              </button>
+            )}
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+          Paste this code directly into the <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded font-mono text-slate-700 dark:text-slate-300">&lt;head&gt;</code> section of your HTML files.
+        </p>
+        <div className="bg-slate-900 text-slate-300 p-6 rounded-2xl shadow-inner border border-slate-800 overflow-x-auto">
+          {formattedSchema ? (
+            <pre className="font-mono text-sm"><code>{wrappedSchema}</code></pre>
+          ) : (
+            <p className="italic text-slate-500">No schema generated or available for this page.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
